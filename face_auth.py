@@ -4,6 +4,8 @@ import os
 datadir = "dataset/textfile/"
 # Feature embedding vector of enrolled faces
 enrolled_faces = []
+enrolled_names = []
+
 namecounter=0
 # The minimum distance between two faces
 # to be called unique
@@ -14,6 +16,13 @@ def init():
     for filename in os.listdir(datadir):
         with open(os.path.join(datadir, filename), 'r') as f:
             line=f.readline()
+            #check for empty files
+            if len(line) < 5:
+                f.close()
+                print(datadir+filename + " is empty, DELETING the file")
+                os.remove(datadir+filename)
+                continue
+            #import the text file
             appendthis = []
             while line:
                 if(line[0].isalpha()):
@@ -27,11 +36,22 @@ def init():
                 line = f.readline()
             f.close()
             enrolled_faces.append(appendthis)
+            enrolled_names.append(filename)
+
+            '''
+            numberindex = -1
+            for i in range(len(filename)):
+                if(filename[i].isalpha()):
+                    continue
+                else:
+                    numberindex=i
+                    break
+            '''
+            
+            
+
+
     print("loaded all faces from text files")
-
-
-
-   		
 
 def enroll_face(embeddings, name):
     """
@@ -49,11 +69,12 @@ def enroll_face(embeddings, name):
                 f.write(str(i)+",")
             f.write("\n")	
         f.write("done")
-    f.close()
-    for embedding in embeddings:
-        # Add feature embedding to list of
-        # enrolled faces
-        enrolled_faces.append(embedding)
+        f.close()
+        for embedding in embeddings:
+            # Add feature embedding to list of
+            # enrolled faces
+            enrolled_faces.append(embedding)
+            enrolled_names.append(name)
 
 
 def delist_face(embeddings):
@@ -95,6 +116,19 @@ def authenticate_emb(embedding):
 
     if embedding is not None:
         # Iterate over all the enrolled faces
+        for i in range(len(enrolled_faces)):
+            # Compute the distance between the enrolled face's
+            # embedding vector and the input image's
+            # embedding vector
+            dist = spatial.distance.cosine(embedding, enrolled_faces[i])
+            # If above distance is less the threshold
+            if dist < authentication_threshold:
+                # Set the authenatication to True
+                # meaning that the input face has been matched
+                # to the current enrolled face
+                authentication = True
+                print("Authenticated: matching "+enrolled_names[i])
+        '''
         for face_emb in enrolled_faces:
             # Compute the distance between the enrolled face's
             # embedding vector and the input image's
@@ -106,6 +140,7 @@ def authenticate_emb(embedding):
                 # meaning that the input face has been matched
                 # to the current enrolled face
                 authentication = True
+        '''
         if authentication:
             # If the face was authenticated
             return True

@@ -1,11 +1,12 @@
+from atexit import register
 import cv2
 import numpy as np
 import depthai as dai
 import os
-import time
+from threading import Thread, Lock
 from face_auth import enroll_face, delist_face, authenticate_emb, init
 import blobconverter
-import keyboard
+import time
 
 # Define Depth Classification model input size
 DEPTH_NN_INPUT_SIZE = (64, 64)
@@ -22,6 +23,29 @@ det_blob_path = "data/depth-classification-models/face-detection-retail-0004.blo
 REC_MODEL_NAME = "Sphereface"
 REC_ZOO_TYPE = "intel"
 rec_blob_path = "data/depth-classification-models/Sphereface.blob"
+
+frame_count = 0  # Frame count
+fps = 0  # Placeholder fps value
+prev_frame_time = 0  # Used to record the time when we processed last frames
+new_frame_time = 0  # Used to record the time at which we processed current frames
+
+# Load image of a lock in locked position
+locked_img = cv2.imread(os.path.join('data', 'images', 'lock_grey.png'), -1)
+# Load image of a lock in unlocked position
+unlocked_img = cv2.imread(os.path.join('data', 'images', 'lock_open_grey.png'), -1)
+
+#control variables
+name = "unnamed"
+userin = ""
+quitthisloop = False
+
+# Set status colors
+status_color = {
+    'Authenticated': (0, 255, 0),
+    'Unauthenticated': (0, 0, 255),
+    'Spoof Detected': (0, 0, 255),
+    'No Face Detected': (0, 0, 255)
+}
 
 # Create DepthAi pipeline
 def create_depthai_pipeline():
@@ -149,12 +173,6 @@ def create_depthai_pipeline():
     return pipeline
 
 
-# Load image of a lock in locked position
-locked_img = cv2.imread(os.path.join('data', 'images', 'lock_grey.png'), -1)
-# Load image of a lock in unlocked position
-unlocked_img = cv2.imread(os.path.join('data', 'images', 'lock_open_grey.png'), -1)
-
-
 # Overlay lock/unlock symbol on the frame
 def overlay_symbol(frame, img, pos=(65, 100)):
     """
@@ -211,25 +229,16 @@ def display_info(frame, bbox, status, status_color, fps):
     cv2.putText(frame, 'Press Q to Quit.', (10, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255))
     cv2.putText(frame, f'FPS: {fps:.2f}', (10, 175), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255))
 
-frame_count = 0  # Frame count
-fps = 0  # Placeholder fps value
-prev_frame_time = 0  # Used to record the time when we processed last frames
-new_frame_time = 0  # Used to record the time at which we processed current frames
-
-# Set status colors
-status_color = {
-    'Authenticated': (0, 255, 0),
-    'Unauthenticated': (0, 0, 255),
-    'Spoof Detected': (0, 0, 255),
-    'No Face Detected': (0, 0, 255)
-}
-
-# Create Pipeline
-pipeline = create_depthai_pipeline()
-init()
-name = "unnamed"
-# Initialize device and start Pipeline
-with dai.Device(pipeline) as device:
+#main method run by thread
+def main(device):
+    global frame_count
+    global fps
+    global prev_frame_time
+    global new_frame_time
+    global name
+    global userin
+    global quitthisloop
+    print("starting main")
     # Start pipeline
     device.startPipeline()
 
@@ -251,6 +260,7 @@ with dai.Device(pipeline) as device:
     # Output queue to get Face Detection nn data
     qDet = device.getOutputQueue(name="det_out", maxSize=4, blocking=False)
 
+    print("Starting main thread")
     while True:
         # Get right camera frame
         inRight = qRight.get()
@@ -279,6 +289,7 @@ with dai.Device(pipeline) as device:
 
         # Get detection NN output
         inDet = qDet.tryGet()
+
 
         if inDet is not None:
             # Get face bbox detections
@@ -350,7 +361,7 @@ with dai.Device(pipeline) as device:
                 if authenticated:
                     # Authenticated
                     status = 'Authenticated'
-                    print("Authenticated")
+                    print(status)
                 else:
                     # Unauthenticated
                     status = 'Unauthenticated'
@@ -361,9 +372,6 @@ with dai.Device(pipeline) as device:
             # No face detected
             status = 'No Face Detected'
 
-        # Display info on frame
-        display_info(frame, bbox, status, status_color, fps)
-
         # Calculate average fps
         if frame_count % 10 == 0:
             # Time when we finish processing last 10 frames
@@ -372,10 +380,43 @@ with dai.Device(pipeline) as device:
             # Fps will be number of frame processed in one second
             fps = 1 / ((new_frame_time - prev_frame_time)/10)
             prev_frame_time = new_frame_time
+        
+        # Display info on frame
+        display_info(frame, bbox, status, status_color, fps)
 
         # Capture the key pressed
         key_pressed = cv2.waitKey(1) & 0xff
 
+        lock.acquire()
+        
+        if(userin == 'i'):
+            name = input("Input a new name >>> ")
+        elif(userin == 'e'):
+            if status == 'No Face Detected' or status == 'Spoof Detected':
+                print("no face found to enroll")
+            elif is_real:
+                print("Enrolling face "+ name)
+                enroll_face([face_embedding], name)
+        elif(userin == 'd'):
+            if is_real:
+                print("Delisting face ")
+                delist_face([face_embedding])
+        elif(userin == 'r'):
+            removethisguy = input("Enter a name to delist. Enter 0 to delete all saved faces >>> ")
+
+        if quitthisloop:
+            print("Exiting main loop")
+            lock.release()
+            return
+        userin = ""
+        lock.release()
+        # Increment frame count
+        cv2.imshow("Authentication Cam", frame)
+        frame_count += 1
+
+
+
+'''
         # Enrol the face if e was pressed
         if key_pressed == ord('e'):
             if is_real:
@@ -387,28 +428,51 @@ with dai.Device(pipeline) as device:
                 delist_face([face_embedding])
         elif key_pressed == ord('i'):
             print()
-        	#somehow get input
+        	#somehow get inputexit()
         # Stop the program if q was pressed
         elif key_pressed == ord('q'):
             break
 
-
-        if keyboard.is_pressed('e'):
-            if is_real:
-                print("enrolling face")
-                enroll_face([face_embedding], name)
-        elif keyboard.is_pressed('i'):
-            print()
-        	#somehow get input
-        elif keyboard.is_pressed('q'):
-            break
-        
         # Display the final frame
-        #cv2.imshow("Authentication Cam", frame)
+        cv2.imshow("Authentication Cam", frame)
+'''
 
-        # Increment frame count
-        frame_count += 1
+
+def keyin():
+    global userin
+    global quitthisloop
+    while True:
+        if(userin == ""):
+            tempuserin = input("Ready for input \n")
+            lock.acquire()
+            userin = tempuserin
+            if(userin == "q"):
+                quitthisloop = True
+                lock.release()
+                return
+            lock.release()
+
+
+
+
+#Start a different thread to load in all the faces
+t_init = Thread(target=init)
+t_init.start()
+
+# Create Pipeline
+pipeline = create_depthai_pipeline()
+t_init.join()
+
+# Initialize device and start Pipeline
+with dai.Device(pipeline) as device:
+    lock = Lock()
+    #t_main = Thread(target=main, args=(device,))
+
+    t_keyboardin = Thread(target = keyin)
+
+    #t_main.start()
+    t_keyboardin.start()
+    main(device)
 
 # Close all output windows
 cv2.destroyAllWindows()
-
