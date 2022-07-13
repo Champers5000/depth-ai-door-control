@@ -1,28 +1,32 @@
-from atexit import register
+logpics = False
+
 import cv2
 import numpy as np
 import depthai as dai
 import os
-from threading import Thread, Lock
-from face_auth import enroll_face, delist_face, authenticate_emb, init
+from face_auth import enroll_face, delist_face, authenticate_emb, init, removenames, takePicture
 import blobconverter
 import time
+from flask import Flask, render_template, Response, request
+from thread_trace import thread_trace
+from threading import Lock
+app = Flask(__name__)
 
 # Define Depth Classification model input size
 DEPTH_NN_INPUT_SIZE = (64, 64)
 
 # Define Face Detection model name and input size
-# If you define the blob make sure the DET_MODEL_NAME and DET_ZOO_TYPE are None
-DET_INPUT_SIZE = (300, 300)
+# If you define the blob make sure the DET_MODEL_NAME and DET_ZOO_TYsPE are None
+DET_INPUT_SIZE = (300,300)
 DET_MODEL_NAME = "face-detection-retail-0004"
 DET_ZOO_TYPE = "depthai"
-det_blob_path = "data/depth-classification-models/face-detection-retail-0004.blob"
+#det_blob_path = "data/depth-classification-models/face-detection-retail-0004.blob"
 
 # Define Face Recognition model name and input size
 # If you define the blob make sure the REC_MODEL_NAME and REC_ZOO_TYPE are None
 REC_MODEL_NAME = "Sphereface"
 REC_ZOO_TYPE = "intel"
-rec_blob_path = "data/depth-classification-models/Sphereface.blob"
+#rec_blob_path = "data/depth-classification-models/Sphereface.blob"
 
 frame_count = 0  # Frame count
 fps = 0  # Placeholder fps value
@@ -34,10 +38,12 @@ locked_img = cv2.imread(os.path.join('data', 'images', 'lock_grey.png'), -1)
 # Load image of a lock in unlocked position
 unlocked_img = cv2.imread(os.path.join('data', 'images', 'lock_open_grey.png'), -1)
 
-#control variables
+#global variables
 name = "unnamed"
 userin = ""
 quitthisloop = False
+frame = None
+prediction = ""
 
 # Set status colors
 status_color = {
@@ -47,18 +53,65 @@ status_color = {
     'No Face Detected': (0, 0, 255)
 }
 
+#methods needed to stream the video
+def gen_frames():  # generate frame by frame from camera
+    global frame
+    while True:
+        # Capture frame-by-frame
+        if frame.all() != None:
+            outputframe = frame  # read the camera frame
+            ret, buffer = cv2.imencode('.jpg', outputframe)
+            outputframe = buffer.tobytes()
+            yield (b'--frame\r\n'
+                b'Content-Type: image/jpeg\r\n\r\n' + outputframe + b'\r\n')  # concat frame one by one and show result
+
+
+@app.route('/video_feed')
+def video_feed():
+    #Video streaming route. Put this in the src attribute of an img tag
+    return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/')
+def index():
+    """Video streaming home page."""
+    return render_template('index.html')
+
+def startflask():
+    app.run(host='0.0.0.0')
+
+#methods needed for depthai
 # Create DepthAi pipeline
 def create_depthai_pipeline():
     # Start defining a pipeline
     pipeline = dai.Pipeline()
 
+
+    #Create color camera pipeline here
+    # Define sources and outputs
+    rgbControl = pipeline.create(dai.node.XLinkIn)
+    camRgb = pipeline.create(dai.node.ColorCamera)
+    xoutJpeg = pipeline.create(dai.node.XLinkOut)
+    # stream names
+    rgbControl.setStreamName("rgbcontrol")
+    xoutJpeg.setStreamName("jpg")
+    # Properties
+    rgbControl.setMaxDataSize(1000)
+    rgbControl.setNumFrames(1)
+    camRgb.setBoardSocket(dai.CameraBoardSocket.RGB)
+    camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_13_MP)
+    # Linking
+    rgbControl.out.link(camRgb.inputControl)
+    camRgb.still.link(xoutJpeg.input)
+
+
     # Define a source - two mono (grayscale) cameras
     left = pipeline.createMonoCamera()
-    left.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
+    left.setResolution(dai.MonoCameraProperties.SensorResolution.THE_480_P)
     left.setBoardSocket(dai.CameraBoardSocket.LEFT)
 
     right = pipeline.createMonoCamera()
-    right.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
+    right.setResolution(dai.MonoCameraProperties.SensorResolution.THE_480_P)
     right.setBoardSocket(dai.CameraBoardSocket.RIGHT)
 
     # Create a node that will produce the depth map
@@ -203,31 +256,32 @@ def overlay_symbol(frame, img, pos=(65, 100)):
 
 # Display info on the frame
 def display_info(frame, bbox, status, status_color, fps):
+    global prediction
     # Display bounding box
     cv2.rectangle(frame, bbox, status_color[status], 2)
 
     # If spoof detected
     if status == 'Spoof Detected':
         # Display "Spoof detected" status on the bbox
-        cv2.putText(frame, "Spoofed", (bbox[0], bbox[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color[status])
+        cv2.putText(frame, prediction, (bbox[0], bbox[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color[status])
 
     # Create background for showing details
-    cv2.rectangle(frame, (5, 5, 175, 150), (50, 0, 0), -1)
+    #cv2.rectangle(frame, (5, 5, 175, 150), (50, 0, 0), -1)
 
     # Display authentication status on the frame
-    cv2.putText(frame, status, (20, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color[status])
+    #cv2.putText(frame, status, (20, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color[status])
 
     # Display lock symbol
-    if status == 'Authenticated':
-        overlay_symbol(frame, unlocked_img)
-    else:
-        overlay_symbol(frame, locked_img)
+    #if status == 'Authenticated':
+    #    overlay_symbol(frame, unlocked_img)
+    #else:
+    #    overlay_symbol(frame, locked_img)
 
     # Display instructions on the frame
-    cv2.putText(frame, 'Press E to Enroll Face.', (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255))
-    cv2.putText(frame, 'Press D to Delist Face.', (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255))
-    cv2.putText(frame, 'Press Q to Quit.', (10, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255))
-    cv2.putText(frame, f'FPS: {fps:.2f}', (10, 175), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255))
+    #cv2.putText(frame, 'Press E to Enroll Face.', (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255))
+    #cv2.putText(frame, 'Press D to Delist Face.', (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255))
+    #cv2.putText(frame, 'Press Q to Quit.', (10, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255))
+    cv2.putText(frame, f'FPS: {fps:.2f}', (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255))
 
 #main method run by thread
 def main(device):
@@ -238,7 +292,8 @@ def main(device):
     global name
     global userin
     global quitthisloop
-    print("starting main")
+    global frame
+    global prediction
     # Start pipeline
     device.startPipeline()
 
@@ -260,22 +315,30 @@ def main(device):
     # Output queue to get Face Detection nn data
     qDet = device.getOutputQueue(name="det_out", maxSize=4, blocking=False)
 
+    # Output queue for color camera
+    qJpeg = device.getOutputQueue(name="jpg", maxSize=1, blocking=False)
+
+    # Input for rgb camera to take pictures
+    qControl = device.getInputQueue(name = "rgbcontrol")
+    
     print("Starting main thread")
     while True:
+
         # Get right camera frame
         inRight = qRight.get()
         r_frame = inRight.getFrame()
-        # r_frame = cv2.flip(r_frame, flipCode=1)
+        #r_frame = cv2.flip(r_frame, flipCode=1)
 
         # Get depth frame
         inDepth = qDepth.get()  # blocking call, will wait until a new data has arrived
         depth_frame = inDepth.getFrame()
         depth_frame = cv2.flip(depth_frame, flipCode=1)
         depth_frame = np.ascontiguousarray(depth_frame)
+        inverted_depth_frame = depth_frame
         depth_frame = cv2.bitwise_not(depth_frame)
 
         # Apply color map to highlight the disparity info
-        depth_frame_cmap = cv2.applyColorMap(depth_frame, cv2.COLORMAP_JET)
+        #depth_frame_cmap = cv2.applyColorMap(depth_frame, cv2.COLORMAP_JET)
         # Show disparity frame
         #cv2.imshow("disparity", depth_frame_cmap)
 
@@ -286,10 +349,10 @@ def main(device):
         img_h, img_w = frame.shape[0:2]
 
         bbox = None
+        mirroredbbox = None
 
         # Get detection NN output
         inDet = qDet.tryGet()
-
 
         if inDet is not None:
             # Get face bbox detections
@@ -304,15 +367,20 @@ def main(device):
                 w = int(detection.xmax * img_w - detection.xmin * img_w)
                 h = int(detection.ymax * img_h - detection.ymin * img_h)
                 bbox = (x, y, w, h)
+                mirroredbbox = (img_w-x-w, y, w, h)
 
         face_embedding = None
         authenticated = False
 
         # Check if a face was detected in the frame
         if bbox:
+            showthis = inverted_depth_frame[max(0, mirroredbbox[1]):mirroredbbox[1] + mirroredbbox[3], max(0, mirroredbbox[0]):mirroredbbox[0] + mirroredbbox[2]]
+            average=showthis.sum()
+            average /= (bbox[2]*bbox[3])
+            showthis = cv2.applyColorMap(showthis, cv2.COLORMAP_JET)
 
             # Get face roi depth frame
-            face_d = depth_frame[max(0, bbox[1]):bbox[1] + bbox[3], max(0, bbox[0]):bbox[0] + bbox[2]]
+            face_d = depth_frame[max(0, mirroredbbox[1]):mirroredbbox[1] + mirroredbbox[3], max(0, mirroredbbox[0]):mirroredbbox[0] + mirroredbbox[2]]
             #cv2.imshow("face_roi", face_d)
 
             # Preprocess face depth map for classification
@@ -333,18 +401,20 @@ def main(device):
             inDepthNn = qDepthNn.tryGet()
 
             is_real = None
-
-            if inDepthNn is not None:
-                # Get prediction
-                cnn_output = inDepthNn.getLayerFp16("dense_2/Sigmoid")
-                # print(cnn_output)
-                if cnn_output[0] > .5:
-                    prediction = 'spoofed'
-                    is_real = False
-                else:
-                    prediction = 'real'
-                    is_real = True
-                #print(prediction)
+            if average>24:
+                if inDepthNn is not None:
+                    # Get prediction
+                    cnn_output = inDepthNn.getLayerFp16("dense_2/Sigmoid")
+                    #print(cnn_output[0])
+                    if cnn_output[0] > .05:
+                        prediction = 'spoofed'
+                        is_real = False
+                    else:
+                        prediction = 'real'
+                        is_real = True
+                    #print(prediction)
+            else:
+                prediction = 'too close'
 
             if is_real:
                 # Check if the face in the frame was authenticated
@@ -361,7 +431,10 @@ def main(device):
                 if authenticated:
                     # Authenticated
                     status = 'Authenticated'
-                    print(status)
+                    #send command to take a colored picture for logging
+                    if logpics:
+                        qControl.send(dai.CameraControl().setCaptureStill(True))
+
                 else:
                     # Unauthenticated
                     status = 'Unauthenticated'
@@ -394,24 +467,28 @@ def main(device):
         elif(userin == 'e'):
             if status == 'No Face Detected' or status == 'Spoof Detected':
                 print("no face found to enroll")
-            elif is_real:
+            elif is_real == True:
                 print("Enrolling face "+ name)
                 enroll_face([face_embedding], name)
         elif(userin == 'd'):
-            if is_real:
-                print("Delisting face ")
+            if is_real == True:
                 delist_face([face_embedding])
         elif(userin == 'r'):
             removethisguy = input("Enter a name to delist. Enter 0 to delete all saved faces >>> ")
-
+            removenames(removethisguy)
         if quitthisloop:
             print("Exiting main loop")
             lock.release()
             return
         userin = ""
         lock.release()
+        
+        #cv2.imshow("Authentication Cam", frame)
+
+        if(status == "Authenticated" and logpics):
+            takePicture(qJpeg, frame)
+        
         # Increment frame count
-        cv2.imshow("Authentication Cam", frame)
         frame_count += 1
 
 
@@ -454,25 +531,29 @@ def keyin():
 
 
 
-
 #Start a different thread to load in all the faces
-t_init = Thread(target=init)
+t_init = thread_trace(target=init)
 t_init.start()
 
 # Create Pipeline
 pipeline = create_depthai_pipeline()
 t_init.join()
 
+t_app = thread_trace(target=startflask)
+t_app.start()
 # Initialize device and start Pipeline
 with dai.Device(pipeline) as device:
+
     lock = Lock()
     #t_main = Thread(target=main, args=(device,))
 
-    t_keyboardin = Thread(target = keyin)
+    t_keyboardin = thread_trace(target = keyin)
 
     #t_main.start()
     t_keyboardin.start()
     main(device)
 
 # Close all output windows
-cv2.destroyAllWindows()
+t_app.kill()
+t_app.join()
+exit(0)
