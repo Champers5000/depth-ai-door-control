@@ -20,13 +20,13 @@ DEPTH_NN_INPUT_SIZE = (64, 64)
 DET_INPUT_SIZE = (300,300)
 DET_MODEL_NAME = "face-detection-retail-0004"
 DET_ZOO_TYPE = "depthai"
-#det_blob_path = "data/depth-classification-models/face-detection-retail-0004.blob"
+det_blob_path = "data/depth-classification-models/face-detection-retail-0004.blob"
 
 # Define Face Recognition model name and input size
 # If you define the blob make sure the REC_MODEL_NAME and REC_ZOO_TYPE are None
 REC_MODEL_NAME = "Sphereface"
 REC_ZOO_TYPE = "intel"
-#rec_blob_path = "data/depth-classification-models/Sphereface.blob"
+rec_blob_path = "data/depth-classification-models/Sphereface.blob"
 
 frame_count = 0  # Frame count
 fps = 0  # Placeholder fps value
@@ -116,13 +116,13 @@ def create_depthai_pipeline():
 
     # Create a node that will produce the depth map
     depth = pipeline.createStereoDepth()
-    depth.setConfidenceThreshold(200)
-    depth.setOutputRectified(True)  # The rectified streams are horizontally mirrored by default
+    depth.initialConfig.setConfidenceThreshold(200)
+    #depth.setOutputRectified(True)  # The rectified streams are horizontally mirrored by default
     depth.setRectifyEdgeFillColor(0)  # Black, to better see the cutout
     depth.setExtendedDisparity(True)  # For better close range depth perception
 
     median = dai.StereoDepthProperties.MedianFilter.KERNEL_7x7  # For depth filtering
-    depth.setMedianFilter(median)
+    depth.initialConfig.setMedianFilter(median)
 
     # Linking mono cameras with depth node
     left.out.link(depth.left)
@@ -157,7 +157,7 @@ def create_depthai_pipeline():
     if DET_MODEL_NAME is not None:
         facedet_blob_path = blobconverter.from_zoo(
             name=DET_MODEL_NAME,
-            shaves=6,
+            shaves=4,
             zoo_type=DET_ZOO_TYPE
         )
 
@@ -174,7 +174,6 @@ def create_depthai_pipeline():
 
     # Create ImageManip to preprocess input frame for detection NN
     detManip = pipeline.createImageManip()
-    # detManip.initialConfig.setHorizontalFlip(True)
     detManip.initialConfig.setResize(DET_INPUT_SIZE[0], DET_INPUT_SIZE[1])
     detManip.initialConfig.setKeepAspectRatio(False)
 
@@ -201,7 +200,7 @@ def create_depthai_pipeline():
     if REC_MODEL_NAME is not None:
         facerec_blob_path = blobconverter.from_zoo(
             name=REC_MODEL_NAME,
-            shaves=6,
+            shaves=4,
             zoo_type=REC_ZOO_TYPE
         )
 
@@ -255,7 +254,7 @@ def overlay_symbol(frame, img, pos=(65, 100)):
 
 
 # Display info on the frame
-def display_info(frame, bbox, status, status_color, fps):
+def display_info(frame, bbox, status, status_color, ft):
     global prediction
     # Display bounding box
     cv2.rectangle(frame, bbox, status_color[status], 2)
@@ -281,12 +280,10 @@ def display_info(frame, bbox, status, status_color, fps):
     #cv2.putText(frame, 'Press E to Enroll Face.', (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255))
     #cv2.putText(frame, 'Press D to Delist Face.', (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255))
     #cv2.putText(frame, 'Press Q to Quit.', (10, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255))
-    cv2.putText(frame, f'FPS: {fps:.2f}', (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255))
+    cv2.putText(frame, f'Frametime: {ft:.4f}ms', (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255))
 
 #main method run by thread
 def main(device):
-    global frame_count
-    global fps
     global prev_frame_time
     global new_frame_time
     global name
@@ -294,8 +291,6 @@ def main(device):
     global quitthisloop
     global frame
     global prediction
-    # Start pipeline
-    device.startPipeline()
 
     # Output queue to get the right camera frames
     qRight = device.getOutputQueue(name="right", maxSize=4, blocking=False)
@@ -323,173 +318,172 @@ def main(device):
     
     print("Starting main thread")
     while True:
-
+        try:
         # Get right camera frame
-        inRight = qRight.get()
-        r_frame = inRight.getFrame()
-        #r_frame = cv2.flip(r_frame, flipCode=1)
+            inRight = qRight.get()
+            r_frame = inRight.getFrame()
+            #r_frame = cv2.flip(r_frame, flipCode=1)
 
-        # Get depth frame
-        inDepth = qDepth.get()  # blocking call, will wait until a new data has arrived
-        depth_frame = inDepth.getFrame()
-        depth_frame = cv2.flip(depth_frame, flipCode=1)
-        depth_frame = np.ascontiguousarray(depth_frame)
-        inverted_depth_frame = depth_frame
-        depth_frame = cv2.bitwise_not(depth_frame)
+            # Get depth frame
+            inDepth = qDepth.get()  # blocking call, will wait until a new data has arrived
+            depth_frame = inDepth.getFrame()
+            depth_frame = cv2.flip(depth_frame, flipCode=1)
+            depth_frame = np.ascontiguousarray(depth_frame)
+            inverted_depth_frame = depth_frame
+            depth_frame = cv2.bitwise_not(depth_frame)
 
-        # Apply color map to highlight the disparity info
-        #depth_frame_cmap = cv2.applyColorMap(depth_frame, cv2.COLORMAP_JET)
-        # Show disparity frame
-        #cv2.imshow("disparity", depth_frame_cmap)
+            # Apply color map to highlight the disparity info
+            #depth_frame_cmap = cv2.applyColorMap(depth_frame, cv2.COLORMAP_JET)
+            # Show disparity frame
+            #cv2.imshow("disparity", depth_frame_cmap)
 
-        # Convert grayscale image frame to 'bgr' (opencv format)
-        frame = cv2.cvtColor(r_frame, cv2.COLOR_GRAY2BGR)
+            # Convert grayscale image frame to 'bgr' (opencv format)
+            frame = cv2.cvtColor(r_frame, cv2.COLOR_GRAY2BGR)
 
-        # Get image frame dimensions
-        img_h, img_w = frame.shape[0:2]
+            # Get image frame dimensions
+            img_h, img_w = frame.shape[0:2]
 
-        bbox = None
-        mirroredbbox = None
+            bbox = None
+            mirroredbbox = None
 
-        # Get detection NN output
-        inDet = qDet.tryGet()
+            # Get detection NN output
+            inDet = qDet.tryGet()
 
-        if inDet is not None:
-            # Get face bbox detections
-            detections = inDet.detections
+            if inDet is not None:
+                # Get face bbox detections
+                detections = inDet.detections
 
-            if len(detections) != 0:
-                # Use first detected face bbox
-                detection = detections[0]
-                # print(detection.confidence)
-                x = int(detection.xmin * img_w)
-                y = int(detection.ymin * img_h)
-                w = int(detection.xmax * img_w - detection.xmin * img_w)
-                h = int(detection.ymax * img_h - detection.ymin * img_h)
-                bbox = (x, y, w, h)
-                mirroredbbox = (img_w-x-w, y, w, h)
+                if len(detections) != 0:
+                    # Use first detected face bbox
+                    detection = detections[0]
+                    # print(detection.confidence)
+                    x = int(detection.xmin * img_w)
+                    y = int(detection.ymin * img_h)
+                    w = int(detection.xmax * img_w - detection.xmin * img_w)
+                    h = int(detection.ymax * img_h - detection.ymin * img_h)
+                    bbox = (x, y, w, h)
+                    mirroredbbox = (img_w-x-w, y, w, h)
 
-        face_embedding = None
-        authenticated = False
+            face_embedding = None
+            authenticated = False
 
-        # Check if a face was detected in the frame
-        if bbox:
-            showthis = inverted_depth_frame[max(0, mirroredbbox[1]):mirroredbbox[1] + mirroredbbox[3], max(0, mirroredbbox[0]):mirroredbbox[0] + mirroredbbox[2]]
-            average=showthis.sum()
-            average /= (bbox[2]*bbox[3])
-            showthis = cv2.applyColorMap(showthis, cv2.COLORMAP_JET)
+            # Check if a face was detected in the frame
+            if bbox:
+                showthis = inverted_depth_frame[max(0, mirroredbbox[1]):mirroredbbox[1] + mirroredbbox[3], max(0, mirroredbbox[0]):mirroredbbox[0] + mirroredbbox[2]]
+                average=showthis.sum()
+                average /= (bbox[2]*bbox[3])
+                showthis = cv2.applyColorMap(showthis, cv2.COLORMAP_JET)
 
-            # Get face roi depth frame
-            face_d = depth_frame[max(0, mirroredbbox[1]):mirroredbbox[1] + mirroredbbox[3], max(0, mirroredbbox[0]):mirroredbbox[0] + mirroredbbox[2]]
-            #cv2.imshow("face_roi", face_d)
+                # Get face roi depth frame
+                face_d = depth_frame[max(0, mirroredbbox[1]):mirroredbbox[1] + mirroredbbox[3], max(0, mirroredbbox[0]):mirroredbbox[0] + mirroredbbox[2]]
+                #cv2.imshow("face_roi", face_d)
 
-            # Preprocess face depth map for classification
-            resized_face_d = cv2.resize(face_d, DEPTH_NN_INPUT_SIZE)
-            resized_face_d = resized_face_d.astype('float16')
+                # Preprocess face depth map for classification
+                resized_face_d = cv2.resize(face_d, DEPTH_NN_INPUT_SIZE)
+                resized_face_d = resized_face_d.astype('float16')
 
-            # Create Depthai Imageframe
-            img = dai.ImgFrame()
-            img.setFrame(resized_face_d)
-            img.setWidth(DEPTH_NN_INPUT_SIZE[0])
-            img.setHeight(DEPTH_NN_INPUT_SIZE[1])
-            img.setType(dai.ImgFrame.Type.GRAYF16)
+                # Create Depthai Imageframe
+                img = dai.ImgFrame()
+                img.setFrame(resized_face_d)
+                img.setWidth(DEPTH_NN_INPUT_SIZE[0])
+                img.setHeight(DEPTH_NN_INPUT_SIZE[1])
+                img.setType(dai.ImgFrame.Type.GRAYF16)
 
-            # Send face depth map to depthai pipeline for classification
-            qDepthIn.send(img)
+                # Send face depth map to depthai pipeline for classification
+                qDepthIn.send(img)
 
-            # Get Depth Classification NN output
-            inDepthNn = qDepthNn.tryGet()
+                # Get Depth Classification NN output
+                inDepthNn = qDepthNn.tryGet()
 
-            is_real = None
-            if average>24:
-                if inDepthNn is not None:
-                    # Get prediction
-                    cnn_output = inDepthNn.getLayerFp16("dense_2/Sigmoid")
-                    #print(cnn_output[0])
-                    if cnn_output[0] > .05:
-                        prediction = 'spoofed'
-                        is_real = False
-                    else:
-                        prediction = 'real'
-                        is_real = True
-                    #print(prediction)
-            else:
-                prediction = 'too close'
-
-            if is_real:
-                # Check if the face in the frame was authenticated
-
-                # Get recognition NN output
-                inRec = qRec.tryGet()
-                if inRec is not None:
-                    # Get embedding of the face
-                    face_embedding = inRec.getFirstLayerFp16()
-                    # print(len(face_embedding))
-
-                    authenticated = authenticate_emb(face_embedding)
-
-                if authenticated:
-                    # Authenticated
-                    status = 'Authenticated'
-                    #send command to take a colored picture for logging
-                    if logpics:
-                        qControl.send(dai.CameraControl().setCaptureStill(True))
-
+                is_real = None
+                if average>24:
+                    if inDepthNn is not None:
+                        # Get prediction
+                        cnn_output = inDepthNn.getLayerFp16("dense_2/Sigmoid")
+                        #print(cnn_output[0])
+                        if cnn_output[0] > .05:
+                            prediction = 'spoofed'
+                            is_real = False
+                        else:
+                            prediction = 'real'
+                            is_real = True
+                        #print(prediction)
                 else:
-                    # Unauthenticated
-                    status = 'Unauthenticated'
+                    prediction = 'too close'
+
+                if is_real:
+                    # Check if the face in the frame was authenticated
+
+                    # Get recognition NN output
+                    inRec = qRec.tryGet()
+                    if inRec is not None:
+                        # Get embedding of the face
+                        face_embedding = inRec.getFirstLayerFp16()
+                        # print(len(face_embedding))
+
+                        authenticated = authenticate_emb(face_embedding)
+
+                    if authenticated:
+                        # Authenticated
+                        status = 'Authenticated'
+                        #send command to take a colored picture for logging
+                        if logpics:
+                            qControl.send(dai.CameraControl().setCaptureStill(True))
+
+                    else:
+                        # Unauthenticated
+                        status = 'Unauthenticated'
+                else:
+                    # Spoof detected
+                    status = 'Spoof Detected'
             else:
-                # Spoof detected
-                status = 'Spoof Detected'
-        else:
-            # No face detected
-            status = 'No Face Detected'
+                # No face detected
+                status = 'No Face Detected'
 
-        # Calculate average fps
-        if frame_count % 10 == 0:
-            # Time when we finish processing last 10 frames
+            # Calculate frame time
             new_frame_time = time.time()
-
-            # Fps will be number of frame processed in one second
-            fps = 1 / ((new_frame_time - prev_frame_time)/10)
+            frametime = (new_frame_time-prev_frame_time)*1000
             prev_frame_time = new_frame_time
-        
-        # Display info on frame
-        display_info(frame, bbox, status, status_color, fps)
+            
+            # Display info on frame
+            display_info(frame, bbox, status, status_color, frametime)
 
-        # Capture the key pressed
-        key_pressed = cv2.waitKey(1) & 0xff
+            # Capture the key pressed
+            key_pressed = cv2.waitKey(1) & 0xff
 
-        lock.acquire()
-        
-        if(userin == 'i'):
-            name = input("Input a new name >>> ")
-        elif(userin == 'e'):
-            if status == 'No Face Detected' or status == 'Spoof Detected':
-                print("no face found to enroll")
-            elif is_real == True:
-                print("Enrolling face "+ name)
-                enroll_face([face_embedding], name)
-        elif(userin == 'd'):
-            if is_real == True:
-                delist_face([face_embedding])
-        elif(userin == 'r'):
-            removethisguy = input("Enter a name to delist. Enter 0 to delete all saved faces >>> ")
-            removenames(removethisguy)
-        if quitthisloop:
-            print("Exiting main loop")
+            lock.acquire()
+            
+            if(userin == 'i'):
+                name = input("Input a new name >>> ")
+            elif(userin == 'e'):
+                if status == 'No Face Detected' or status == 'Spoof Detected':
+                    print("no face found to enroll")
+                elif is_real == True:
+                    print("Enrolling face "+ name)
+                    enroll_face([face_embedding], name)
+            elif(userin == 'd'):
+                if is_real == True:
+                    delist_face([face_embedding])
+            elif(userin == 'r'):
+                removethisguy = input("Enter a name to delist. Enter 0 to delete all saved faces >>> ")
+                removenames(removethisguy)
+            if quitthisloop:
+                print("Exiting main loop")
+                lock.release()
+                return
+            userin = ""
             lock.release()
-            return
-        userin = ""
-        lock.release()
-        
-        #cv2.imshow("Authentication Cam", frame)
+            
+            #cv2.imshow("Authentication Cam", frame)
 
-        if(status == "Authenticated" and logpics):
-            takePicture(qJpeg, frame)
+            if(status == "Authenticated" and logpics):
+                takePicture(qJpeg, frame)
+        except KeyboardInterrupt:
+            userin = "q"
+            return
+        except:
+            print("Error in producing frame")
         
-        # Increment frame count
-        frame_count += 1
 
 
 
@@ -523,11 +517,11 @@ def keyin():
             tempuserin = input("Ready for input \n")
             lock.acquire()
             userin = tempuserin
-            if(userin == "q"):
-                quitthisloop = True
-                lock.release()
-                return
+        if(userin == "q"):
+            quitthisloop = True
             lock.release()
+            return
+        lock.release()
 
 
 
