@@ -81,7 +81,7 @@ def enroll_face(embeddings, name):
             # Add feature embedding to list of
             # enrolled faces
             enrolled_faces.append(embedding)
-            enrolled_names.append(name)
+            enrolled_names.append(filename)
 
 
 def delist_face(embeddings):

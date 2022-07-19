@@ -27,16 +27,16 @@ while True:
 
             # Correct bounding box
             correct_bb(det)
+            if det.xmax <1.0:
+                # Set config parameters
+                cfg = ImageManipConfig()
+                #set limits on how small the face can be to avoid imagmanip errors
+                if det.xmax-det.xmin > 0.12 and det.ymax-det.ymin >0.24 :
+                    #node.warn(str(det.xmax-det.xmin) + " "+ str(det.ymax-det.ymin))
+                    cfg.setCropRect(det.xmin, det.ymin, det.xmax, det.ymax)
+                    cfg.setResize(96, 112)  # Input size of Face Rec model
+                    cfg.setKeepAspectRatio(False)
 
-            # Set config parameters
-            cfg = ImageManipConfig()
-            #set limits on how small the face can be to avoid imagmanip errors
-            if det.xmax-det.xmin > 0.12 and det.ymax-det.ymin >0.24 :
-                #node.warn(str(det.xmax-det.xmin) + " "+ str(det.ymax-det.ymin))
-                cfg.setCropRect(det.xmin, det.ymin, det.xmax, det.ymax)
-                cfg.setResize(96, 112)  # Input size of Face Rec model
-                cfg.setKeepAspectRatio(False)
-
-                # Output image and config
-                node.io['manip_cfg'].send(cfg)
-                node.io['manip_img'].send(img)
+                    # Output image and config
+                    node.io['manip_cfg'].send(cfg)
+                    node.io['manip_img'].send(img)

@@ -280,7 +280,7 @@ def display_info(frame, bbox, status, status_color, ft):
     #cv2.putText(frame, 'Press E to Enroll Face.', (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255))
     #cv2.putText(frame, 'Press D to Delist Face.', (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255))
     #cv2.putText(frame, 'Press Q to Quit.', (10, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255))
-    cv2.putText(frame, f'Frametime: {ft:.4f}ms', (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255))
+    cv2.putText(frame, f'Frametime: {ft:.2f}ms', (10, 25), cv2.FONT_HERSHEY_DUPLEX, 0.6, (69,69,255))
 
 #main method run by thread
 def main(device):
@@ -364,6 +364,7 @@ def main(device):
                     bbox = (x, y, w, h)
                     mirroredbbox = (img_w-x-w, y, w, h)
 
+
             face_embedding = None
             authenticated = False
 
@@ -419,7 +420,6 @@ def main(device):
                     if inRec is not None:
                         # Get embedding of the face
                         face_embedding = inRec.getFirstLayerFp16()
-                        # print(len(face_embedding))
 
                         authenticated = authenticate_emb(face_embedding)
 
@@ -459,8 +459,14 @@ def main(device):
                 if status == 'No Face Detected' or status == 'Spoof Detected':
                     print("no face found to enroll")
                 elif is_real == True:
-                    print("Enrolling face "+ name)
-                    enroll_face([face_embedding], name)
+                    try:
+                        if face_embedding is not None:
+                            print("Enrolling face "+ name)
+                            enroll_face([face_embedding], name)
+                        else:
+                            print("Move closer to camera. Face is too small to process")
+                    except:
+                        print("Error processing this frame. Try again?")
             elif(userin == 'd'):
                 if is_real == True:
                     delist_face([face_embedding])
@@ -481,8 +487,6 @@ def main(device):
         except KeyboardInterrupt:
             userin = "q"
             return
-        except:
-            print("Error in producing frame")
         
 
 
@@ -517,11 +521,11 @@ def keyin():
             tempuserin = input("Ready for input \n")
             lock.acquire()
             userin = tempuserin
+            lock.release()
         if(userin == "q"):
             quitthisloop = True
-            lock.release()
             return
-        lock.release()
+        
 
 
 
