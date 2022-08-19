@@ -1,4 +1,4 @@
-logpics = False
+logpics = True
 
 import cv2
 import numpy as np
@@ -543,11 +543,8 @@ t_app.start()
 with dai.Device(pipeline) as device:
 
     lock = Lock()
-    #t_main = Thread(target=main, args=(device,))
 
     t_keyboardin = thread_trace(target = keyin)
-
-    #t_main.start()
     t_keyboardin.start()
     main(device)
 
