@@ -1,4 +1,4 @@
-# A program to recognize faces on OAK devices. Anti-spoofing functionality has been implemented to prevent flat 2D images of faces from being recognized. 
+### A program to recognize faces on OAK devices. Anti-spoofing functionality has been implemented to prevent flat 2D images of faces from being recognized. 
 
 # User manual
 The terminal in which the program runs captures user input. Commands can be issued by simply typing letters and then pressing enter
